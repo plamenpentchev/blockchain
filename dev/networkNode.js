@@ -4,9 +4,11 @@ const blockchain = require('./blockchain');
 const uuid = require('uuid');
 const rp = require('request-promise');
 
+
 const app = express();
 const thisNodeAddress = uuid.v1().split('-').join('')
-const port = process.argv[2]
+const port = process.argv[2];
+const mineReward ={amount:12.5, sender: '00', recipient:thisNodeAddress};
 
 
 const bitcoin = new blockchain();
@@ -19,7 +21,8 @@ app.get('/blockchain', function (req, res) {
 });
 
 app.post('/transaction', function (req, res) {
-    const blockIndex = bitcoin.createNewTransaction(req.body.amount, req.body.sender, req.body.recipient);
+    const newTransaction = bitcoin.createNewTransaction(req.body.amount, req.body.sender, req.body.recipient);
+    const blockIndex = bitcoin.addTransactionToPendingTransactions(newTransaction);
     res.json({note:` The transaction will be added to block nr. ${blockIndex}`});
 });
 
@@ -34,6 +37,8 @@ app.get('/mine', function (req, res) {
     const blockHash = bitcoin.hashBlock(previousBlockHash, currData, nonce);
     //reward for mining
     bitcoin.createNewTransaction(12.5, '00',  thisNodeAddress);
+
+    // bitcoin.createNewTransaction(...mineReward);
     const newBlock = bitcoin.createNewBlock(nonce, previousBlockHash, blockHash);
     res.json({note: 'New block mined successfully', nodeAddress: thisNodeAddress , block: newBlock});
 });
@@ -43,11 +48,11 @@ app.get('/mine', function (req, res) {
  * the whole network(to all of the others network nodes).
  */
 app.post('/register-and-broadcast-node', function (req, res) {
+    
     const newNodeUrl = req.body.newNodeUrl;
-    if (!bitcoin.networkNodes.includes(newNodeUrl)) {
-        //register the new node with itself.
-        bitcoin.networkNodes.push(newNodeUrl);
-    }
+     //register the new node with the node which endpoint has been addressed.
+     addNodeUrl(bitcoin, newNodeUrl);
+    
     //broadcast the new node to all the other nodes,
     //that are already present in the network.
     const regNodesPromises = [];
@@ -61,11 +66,14 @@ app.post('/register-and-broadcast-node', function (req, res) {
                 newNodeUrl: newNodeUrl
             }
         }
+        
         regNodesPromises.push(rp(requestOptions));
     });
-    //register all existent nodes with the new node.
+   
+   
     Promise.all(regNodesPromises)
     .then(data => {
+         //register all existent nodes with the new node.
         const bulkRegisterOptions = {
             uri:`${newNodeUrl}/register-nodes-bulk`,
             method:'POST',
@@ -74,11 +82,12 @@ app.post('/register-and-broadcast-node', function (req, res) {
                 allNetworkNodes: [...bitcoin.networkNodes, bitcoin.currentNodeUrl]
             }
         }
-        return rp(bulkRegisterOptions)
-        .then(data => {
-            res.json(){note:'New node registered with network successfully.'};
-        });
-    });
+        return rp(bulkRegisterOptions);}
+    )
+    .then(data => {
+        res.json({note:'New node registered with network successfully.'});
+    })
+    .catch(err => console.log(err));
     
 });
 
@@ -88,16 +97,34 @@ app.post('/register-and-broadcast-node', function (req, res) {
  */
 app.post('/register-node', function (req, res) {
     
+    const newNodeUrl = req.body.newNodeUrl;
+    addNodeUrl(bitcoin, newNodeUrl);
+    
+    res.json({note: 'New node registered successfully.'});
 })
 
 /**
  * will register miltiple nodes at once.
  */
 app.post('/register-nodes-bulk', function (req, res) {
-    
+    const allNetworkNodes = req.body.allNetworkNodes;
+    console.log(allNetworkNodes);
+    allNetworkNodes.forEach(networkNodeUrl => {
+        addNodeUrl(bitcoin, networkNodeUrl);
+    });
+    res.json('Bulk registration successful.');
 })
 
 
 app.listen(port, function () {
     console.log(`- Listening on port ${port}.`);
 })
+
+const addNodeUrl = function (blockchain, nodeUrl) {
+    const nodeAlreadyPresent = blockchain.networkNodes.includes(nodeUrl.trim());
+    const isCurrentNode =  blockchain.currentNodeUrl.trim() === nodeUrl.trim();
+    if (! nodeAlreadyPresent && !isCurrentNode) {
+        
+        blockchain.networkNodes.push(nodeUrl);
+    }
+}
