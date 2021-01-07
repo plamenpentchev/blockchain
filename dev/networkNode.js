@@ -182,6 +182,55 @@ app.post('/register-nodes-bulk', function (req, res) {
     res.json('Bulk registration successful.');
 })
 
+/**
+ * will implement the longest chain consensus algorithm
+ */
+app.get('/consensus', function (req, res) {
+    const requestPromisses = [];
+    //make request to all nodes in the network to access the blockahins hosted on each of them.
+    bitcoin.networkNodes.forEach(nodeUrl => {
+        const requestOptions = {
+            uri: `${nodeUrl}/blockchain`,
+            method:'GET',
+            json:true
+        }
+        requestPromisses.push(rp(requestOptions));
+    });
+
+    Promise.all(requestPromisses).then(blockchains => {
+        const currentChainLength = bitcoin.chain.length;
+        let maxChainLength = currentChainLength;
+        let newLongestChain = null;
+        let newPendingTransactions = null;
+         
+        
+        //look for a longer chain on each blockchain in the network.
+        blockchains.forEach(blockchain => {
+            if(blockchain.chain.length > maxChainLength ) {
+                maxChainLength = blockchain.chain.length;
+                newLongestChain = blockchain.chain;
+                newPendingTransactions = blockchain.pendingTransactions;
+            }
+        });
+        if (!newLongestChain || 
+            (newLongestChain && !bitcoin.isChainValid(newLongestChain))) {
+                //current chain is the longest or there is a longer chain
+                //but is not valid
+            res.json({
+                note:'Current chain has not been reaplaced.',
+                chain: bitcoin.chain
+            });
+        } else {
+            //there is a longer chain than the current so replace it
+            bitcoin.chain = newLongestChain;
+            bitcoin.pendingTransactions = newPendingTransactions;
+            res.json({
+                note:'This chain has been replaced.',
+                chain:bitcoin.chain
+            })
+        }
+    });
+})
 
 app.listen(port, function () {
     console.log(`- Listening on port ${port}.`);
